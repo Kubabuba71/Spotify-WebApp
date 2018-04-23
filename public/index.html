@@ -1,0 +1,387 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Example of the Authorization Code flow with Spotify</title>
+    <link rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap.min.css">
+    <style type="text/css">
+      #login, #loggedin {
+        display: none;
+      }
+      .text-overflow {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        width: 500px;
+      }
+      .artist-image{
+        display:block;
+        width:150px;
+      }
+    </style>
+    <link rel="stylesheet" href="style.css">
+  </head>
+
+  <body>
+    <div class="container">
+      <div id="login">
+        <h1>Basic web-app utilizing Spotify's Web API</h1>
+        <a href="/login" class="btn btn-primary">Log in with Spotify</a>
+      </div>
+      <div id="loggedin">
+        <br>
+        <button class="btn btn-default" id="obtain-new-token">Obtain new token using the refresh token (Press here in case Song Information doesnt update)</button>
+        <!-- <button class="btn btn-default" id="obtain-song-info">Obtain current song information</button> -->
+        <div id="user-profile">
+        </div>
+        <div id="oauth">
+        </div>
+        <div id="song-information">
+        </div>
+        <div id="song-information-widget">
+          <dl class="dl-horizontal">
+            <dd class="text-overflow">
+              <iframe id="spotify-widget" src="https://open.spotify.com/embed?uri=spotify:track:10uLt6pkF4qaEmToTjnyLc"
+              width="300" height="380" frameborder="0" allowtransparency="true" allow="encrypted-media"></iframe>
+            </dd>
+          </dl>
+        </div>
+        <div id="top-artists">
+        </div>
+      </div>
+    </div>
+
+    <script id="user-profile-template" type="text/x-handlebars-template">
+      <h1>Logged in as {{display_name}}</h1>
+      <div class="media">
+        <div class="pull-left">
+          <img class="media-object" width="150" src="{{images.0.url}}" />
+        </div>
+        <div class="media-body">
+          <dl class="dl-horizontal">
+            <dt>Display name</dt><dd class="clearfix">{{display_name}}</dd>
+            <dt>Id</dt><dd>{{id}}</dd>
+            <dt>Email</dt><dd>{{email}}</dd>
+            <dt>Spotify URI</dt><dd><a href="{{external_urls.spotify}}">{{external_urls.spotify}}</a></dd>
+            <dt>Link</dt><dd><a href="{{href}}">{{href}}</a></dd>
+            <dt>Profile Image</dt><dd class="clearfix"><a href="{{images.0.url}}">{{images.0.url}}</a></dd>
+            <dt>Country</dt><dd>{{country}}</dd>
+            <dt>Birthdate</dt><dd>{{birthdate}}</dd>
+          </dl>
+        </div>
+      </div>
+    </script>
+
+    <script id="oauth-template" type="text/x-handlebars-template">
+      <h2>oAuth info</h2>
+      <dl class="dl-horizontal">
+        <dt>Access token</dt><dd class="text-overflow">{{access_token}}</dd>
+        <dt>Refresh token</dt><dd class="text-overflow">{{refresh_token}}</dd>
+      </dl>
+    </script>
+
+    <script id="song-information-template" type="text/x-handlebars-template">
+      <h2>Song Information</h2>
+      <dl class="dl-horizontal">
+        <dt>Song Info</dt><dd class="text-overflow">{{song_info}}</dd>
+        <dt>Song Position</dt><dd class="text-overflow">{{song_position}}</dd>
+      </dl>
+    </script>
+
+    <script id="top-artists-template" type="text/x-handlebars-template">
+      <div class="media-body">
+        <h2>Top Artists</h2>
+          <dl class="dl-horizontal">
+            <dt>1</dt>
+            <dd class="text-overflow">{{artist1Name}}</dd>
+            <dd>
+              <!-- <a class="artist-image" href="{{artist1PageURL}}"> -->
+              <img class="media-object" id="artist-1-image" width="150" src="{{artist1ImageURL}}"/>
+              <!-- </a> -->
+            </dd>
+            
+            <dt>2</dt>
+            <dd class="text-overflow">{{artist2Name}}</dd>
+            <dd>
+              <!-- <a class="artist-image" href="{{artist2PageURL}}"> -->
+              <img class="media-object" id="artist-2-image" width="150" src="{{artist2ImageURL}}"/>
+              <!-- </a> -->
+            </dd>
+            
+            <dt>3</dt>
+            <dd class="text-overflow">{{artist3Name}}</dd>
+            <dd>
+              <!-- <a class="artist-image" href="{{artist3PageURL}}"> -->
+              <img class="media-object" id="artist-3-image" width="150" src="{{artist3ImageURL}}"/>
+              <!-- </a> -->
+            </dd>
+            
+            <dt>4</dt>
+            <dd class="text-overflow">{{artist4Name}}</dd>
+            <dd>
+              <!-- <a class="artist-image" href="{{artist4PageURL}}"> -->
+              <img class="media-object" id="artist-4-image" width="150" src="{{artist4ImageURL}}"/>
+              <!-- </a> -->
+            </dd>
+            
+            <dt>5</dt>
+            <dd class="text-overflow">{{artist5Name}}</dd>
+            <dd>
+              <!-- <a class="artist-image" href="{{artist5PageURL}}"> -->
+              <img class="media-object" id="artist-5-image" width="150" src="{{artist5ImageURL}}"/>
+              <!-- </a> -->
+            </dd>
+          </dl>
+      </div>
+    </script>
+
+    <script src="//cdnjs.cloudflare.com/ajax/libs/handlebars.js/2.0.0-alpha.1/handlebars.min.js"></script>
+    <script type="text/javascript" src="//code.jquery.com/jquery-1.10.1.min.js"></script>
+    <script>
+      (function() {
+
+        var showOAuth = false;
+
+        /**
+         * Obtains parameters from the hash of the URL
+         * @return Object
+         */
+        function getHashParams() {
+          var hashParams = {};
+          var e, r = /([^&;=]+)=?([^&;]*)/g,
+              q = window.location.hash.substring(1);
+          while ( e = r.exec(q)) {
+             hashParams[e[1]] = decodeURIComponent(e[2]);
+          }
+          return hashParams;
+        }
+
+        /**
+         * Generates a pretty form of ellapsed-time in the song - from ms to mm:ss
+         * @return String
+         */
+        function generateTimestamp(msecs){
+          secs = msecs / 1000;
+          mins = Math.floor(secs / 60);
+          secs = Math.floor(secs % 60);
+          if (secs < 10){
+            secs = '0' + secs;
+          }
+          if (mins < 10){
+            mins = '0' + mins
+          }
+          return mins + ':' + secs;
+        }
+
+
+        /**
+         * Generates a new access token, using the refresh token & displays the new access token if specified
+         */
+        function updateOAuthInfo(){
+          $.ajax({
+              url: '/refresh_token',
+              data: {
+                'refresh_token': refresh_token
+              }
+            }).done(function(data) {
+              access_token = data.access_token;
+              console.log(access_token);
+              if(showOAuth){
+                renderOAuthInformation()
+              }
+            });
+        }
+
+        /**
+         * Renders the current OAuth Information
+         */
+        function renderOAuthInformation(){
+          oauthPlaceholder.innerHTML = oauthTemplate({
+            access_token: access_token,
+            refresh_token: refresh_token
+          });
+        }
+
+        /**
+         * Updates the URI the Spotify Widget is using, so it reflects current playback
+         * @param uri - The Spotify URI of the current song
+         */
+        function updateWidget(uri){
+          document.getElementById('spotify-widget').src = "https://open.spotify.com/embed?uri=" + uri;
+        }
+
+        var prevSongInfo = "";
+
+        /**
+         * Renders Information about currently playing song
+         */
+        function renderCurrentSongInformation(){
+          $.ajax({
+              url: 'https://api.spotify.com/v1/me/player',
+              headers:{
+                'Authorization': 'Bearer ' + access_token
+              }
+            }).done(function(data){
+              console.log(data);
+              var song_name = data.item.name;
+              var song_artist = data.item.artists[0].name;
+              var song_info = song_name + ' by ' + song_artist;
+              
+              var song_position = generateTimestamp(data.progress_ms);
+              
+              var song_image_url = data.item.album.images[0].url;
+
+              if(prevSongInfo != song_info){
+                prevSongInfo = song_info
+                updateWidget(data.item.uri);
+              }
+
+              songPlaceholder.innerHTML = songTemplate({
+                  song_info: song_info,
+                  song_position: song_position
+                });
+            });
+        }
+
+        /**
+         * Renders user's top artists
+         */
+        function renderTopArtists(){
+          $.ajax({
+            url: 'https://api.spotify.com/v1/me/top/artists',
+            headers: {
+              'Authorization': 'Bearer ' + access_token
+            }
+          }).done(function(data){
+            console.log(data);
+            artistNames     = [];
+            artistImageURLs = [];
+            artistPageURLs  = [];
+            artistURIs      = [];
+
+            for(var i = 0; i < 5; i++){
+              artistNames[i]      = data.items[i].name;
+              artistImageURLs[i]  = data.items[i].images[0].url;
+              artistPageURLs[i]   = data.items[i].external_urls.spotify;
+              artistURIs[i]       = data.items[i].uri;
+              console.log(data.items[i].uri);
+            }
+
+            topArtistsPlaceholder.innerHTML = topArtistsTemplate({
+              artist1Name: artistNames[0],
+              artist2Name: artistNames[1],
+              artist3Name: artistNames[2],
+              artist4Name: artistNames[3],
+              artist5Name: artistNames[4],
+
+              artist1ImageURL: artistImageURLs[0],
+              artist2ImageURL: artistImageURLs[1],
+              artist3ImageURL: artistImageURLs[2],
+              artist4ImageURL: artistImageURLs[3],
+              artist5ImageURL: artistImageURLs[4],
+
+              artist1PageURL: artistPageURLs[0],
+              artist2PageURL: artistPageURLs[1],
+              artist3PageURL: artistPageURLs[2],
+              artist4PageURL: artistPageURLs[3],
+              artist5PageURL: artistPageURLs[4]
+            });
+
+            document.getElementById("artist-1-image").addEventListener('click', function(){
+              playArtist(artistURIs[0]);
+            });
+            document.getElementById("artist-2-image").addEventListener('click', function(){
+              playArtist(artistURIs[1]);
+            });
+            document.getElementById("artist-3-image").addEventListener('click', function(){
+              playArtist(artistURIs[2]);
+            });
+            document.getElementById("artist-4-image").addEventListener('click', function(){
+              playArtist(artistURIs[3]);
+            });
+            document.getElementById("artist-5-image").addEventListener('click', function(){
+              playArtist(artistURIs[4]);
+            });
+          });
+        }
+
+        function playArtist(artistURI){
+          $.ajax({
+            url: 'https://api.spotify.com/v1/me/player/play',
+            type: 'PUT',
+            headers: {
+              'Authorization': 'Bearer ' + access_token
+            },
+            data:JSON.stringify({"context_uri": artistURI})
+          });
+        }
+
+        /**
+         * Renders user's information
+         */
+        function renderUserInformation(){
+          $.ajax({
+              url: 'https://api.spotify.com/v1/me',
+              headers: {
+                'Authorization': 'Bearer ' + access_token
+              },
+              success: function(response) {
+                userProfilePlaceholder.innerHTML = userProfileTemplate(response);
+
+                $('#login').hide();
+                $('#loggedin').show();
+              }
+            });
+        }
+
+        /**
+         * Renders all components of the webpage
+         */
+        function renderPage(){
+          if(showOAuth){renderOAuthInformation();}
+          renderCurrentSongInformation();
+          renderTopArtists();
+          renderUserInformation();
+        }
+
+        var userProfileSource = document.getElementById('user-profile-template').innerHTML,
+            userProfileTemplate = Handlebars.compile(userProfileSource),
+            userProfilePlaceholder = document.getElementById('user-profile');
+
+        var oauthSource = document.getElementById('oauth-template').innerHTML,
+            oauthTemplate = Handlebars.compile(oauthSource),
+            oauthPlaceholder = document.getElementById('oauth');
+
+        var songSource = document.getElementById('song-information-template').innerHTML,
+            songTemplate = Handlebars.compile(songSource),
+            songPlaceholder = document.getElementById('song-information');
+
+        var topArtistsSource = document.getElementById('top-artists-template').innerHTML,
+            topArtistsTemplate = Handlebars.compile(topArtistsSource),
+            topArtistsPlaceholder = document.getElementById('top-artists');
+        
+        var params = getHashParams();
+
+        var access_token = params.access_token,
+            refresh_token = params.refresh_token,
+            error = params.error;
+
+        if (error) {
+          alert('There was an error during the authentication');
+        } else {
+          if (access_token) {
+            renderPage();
+          } else {
+              // render initial screen
+              $('#login').show();
+              $('#loggedin').hide();
+          }
+
+          document.getElementById('obtain-new-token').addEventListener('click', function() {
+            updateOAuthInfo();
+          }, false);
+          window.setInterval(function(){renderCurrentSongInformation();}, 1000);
+        }
+      })();
+    </script>
+  </body>
+</html>
